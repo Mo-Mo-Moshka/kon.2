@@ -16,8 +16,9 @@
 2. **Сбор данных** — прямые зависимости пакета Maven.
 3. **Основные операции** — граф с учётом транзитивности, обход в
    ширину без рекурсии, циклы, тестовый репозиторий.
-4. **Дополнительные операции** — обратные зависимости (текущий этап).
-5. Визуализация: Mermaid, PNG, ASCII-дерево.
+4. **Дополнительные операции** — обратные зависимости.
+5. **Визуализация** — Mermaid, изображение PNG, ASCII-дерево
+   (текущий этап).
 
 ## Структура репозитория
 
@@ -30,6 +31,11 @@ src/
     maven.py            загрузка и разбор POM, прямые зависимости
     testrepo.py         тестовый репозиторий из текстового файла
     graph.py            построение графа (BFS) и поиск циклов
+    mermaid.py          описание графа на языке Mermaid
+    tree.py             вывод зависимостей ASCII-деревом
+    image.py            размещение узлов и рисование графа
+    png.py              растровый холст и запись файла PNG
+    font.py             растровый шрифт 5x7 для подписей
     errors.py           ошибки приложения
 config.ini              конфигурация по умолчанию
 examples/
@@ -37,19 +43,21 @@ examples/
   httpclient.ini
   spring_web.ini
   test_*.ini            примеры работы с тестовым репозиторием
-  reverse_*.ini         примеры обратных зависимостей
   test_repo.txt         описания тестовых репозиториев
   repo_*.txt
   bad_*.ini             примеры ошибок в параметрах
+  *.mmd                 описания Mermaid, построенные по примерам
 tests/
   test_config.py        тесты конфигурации
   test_package.py       тесты координат пакета
   test_maven.py         тесты разбора POM и прямых зависимостей
   test_testrepo.py      тесты файла тестового репозитория
   test_graph.py         тесты построения графа и поиска циклов
+  test_visual.py        тесты Mermaid, ASCII-дерева и PNG
   test_main.py          тесты точки входа
 run.sh / run.bat        запуск приложения
 pytest.ini              настройки pytest (путь к пакету src)
+compare/                сравнение с mvn dependency:tree
 ```
 
 ## Запуск
@@ -95,7 +103,6 @@ ascii_tree = on
 | `repository.test_file` | путь к файлу описания тестового репозитория                    |
 | `output.image`         | имя сгенерированного файла с изображением графа (PNG)          |
 | `output.ascii_tree`    | режим вывода зависимостей в формате ASCII-дерева               |
-| `output.reverse`       | режим вывода обратных зависимостей (этап 4)                    |
 
 Логические параметры принимают значения `on`/`off`, `yes`/`no`,
 `true`/`false`, `1`/`0`, `да`/`нет`.
@@ -278,6 +285,10 @@ $ python src/main.py --config examples/spring_web.ini
 
 ## Этап 4. Обратные зависимости
 
+Режим требовался только на этапе 4, поэтому на этапе 5 он убран
+вместе с параметром `output.reverse` и примерами `reverse_*.ini`.
+Ниже описано, как он работал.
+
 При `reverse = on` приложение выводит обратные зависимости пакета —
 те пакеты, которые зависят от него (прямо или через цепочку). Для
 этого прямые связи репозитория переворачиваются, а дальше работает
@@ -322,8 +333,168 @@ $ python src/main.py --config examples/reverse_e.ini
 
 ```
 $ python src/main.py --config examples/reverse_maven.ini
-Ошибка: обратные зависимости доступны только для тестового репозитория: репозиторий Maven не позволяет узнать, кто зависит от пакета, без полного индекса всех пакетов
+Ошибка: обратные зависимости доступны только для тестового
+репозитория: репозиторий Maven не позволяет узнать, кто зависит
+от пакета, без полного индекса всех пакетов
 ```
+
+## Этап 5. Визуализация
+
+Для построенного графа приложение:
+
+1. формирует текстовое представление на языке диаграмм **Mermaid**
+   и печатает его на экран, одновременно сохраняя рядом с картинкой
+   файл с расширением `.mmd`;
+2. сохраняет изображение графа в файле **PNG** (имя задаётся
+   параметром `output.image`);
+3. при `ascii_tree = on` печатает зависимости в виде
+   **ASCII-дерева**.
+
+Изображение рисуется самостоятельно: узлы раскладываются по уровням
+обхода в ширину, рёбра рисуются алгоритмом Брезенхэма, подписи —
+растровым шрифтом 5x7 (`font.py`), файл PNG собирается из блоков
+IHDR/IDAT/IEND со сжатием `zlib` (`png.py`). Сторонние графические
+библиотеки не используются, поэтому подписи выводятся латиницей
+заглавными буквами. Корневой пакет выделен оранжевой рамкой, рёбра
+циклов — красным, пакеты с неизвестными зависимостями — серой рамкой.
+
+### Три примера
+
+| Пакет                                                | Конфигурация              |
+| ---------------------------------------------------- | ------------------------- |
+| `com.fasterxml.jackson.core:jackson-databind:2.16.1` | `examples/jackson.ini`    |
+| `org.apache.httpcomponents:httpclient:4.5.14`        | `examples/httpclient.ini` |
+| `org.springframework:spring-web:6.1.3`               | `examples/spring_web.ini` |
+
+Изображения в репозитории не хранятся: бинарные файлы в нём
+запрещены. Они создаются при запуске — например,
+`examples/spring_web.png` после команды
+`python src/main.py --config examples/spring_web.ini`. Описания
+Mermaid тех же графов лежат рядом в текстовых файлах
+`examples/*.mmd`; их можно открыть в любом редакторе Mermaid
+(например, mermaid.live) и получить ту же картинку.
+
+Пример с циклом — тестовый репозиторий `examples/test_mode.ini`
+(изображение `examples/A.png`, описание `examples/A.mmd`).
+
+```
+$ python src/main.py --config examples/spring_web.ini
+...
+Представление графа на языке Mermaid:
+  graph TD
+      n0["org.springframework:spring-web:6.1.3"]
+      n1["org.springframework:spring-beans:6.1.3"]
+      n2["org.springframework:spring-core:6.1.3"]
+      n3["io.micrometer:micrometer-observation:1.12.2"]
+      n4["org.springframework:spring-jcl:6.1.3"]
+      n5["io.micrometer:micrometer-commons:1.12.2"]
+      n0 --> n1
+      n0 --> n2
+      n0 --> n3
+      n1 --> n2
+      n2 --> n4
+      n3 --> n5
+      classDef root fill:#fff6e6,stroke:#c86e1e,stroke-width:2px;
+      classDef unresolved fill:#f4f4f4,stroke:#999,stroke-dasharray:4;
+      class n0 root;
+Изображение графа: examples\spring_web.png
+Описание Mermaid: examples\spring_web.mmd
+Дерево зависимостей:
+  org.springframework:spring-web:6.1.3
+  ├── org.springframework:spring-beans:6.1.3
+  │   └── org.springframework:spring-core:6.1.3
+  │       └── org.springframework:spring-jcl:6.1.3
+  ├── org.springframework:spring-core:6.1.3 (повтор)
+  └── io.micrometer:micrometer-observation:1.12.2
+      └── io.micrometer:micrometer-commons:1.12.2
+```
+
+В ASCII-дереве уже раскрытый пакет помечается как `(повтор)`,
+а возврат к пакету из текущей ветви — как `(цикл)`; дерево строится
+без рекурсии, на явном стеке:
+
+```
+$ python src/main.py --config examples/test_cycle.ini
+...
+Дерево зависимостей:
+  A
+  ├── B
+  │   └── C
+  │       └── A (цикл)
+  └── D
+      └── D (цикл)
+```
+
+### Сравнение со штатным инструментом
+
+Штатное средство Maven — `mvn dependency:tree` (Apache Maven 3.9.9,
+JDK 21, плагин `maven-dependency-plugin` 3.8.1). Для каждого из трёх
+пакетов в каталоге `compare/` лежит минимальный проект `pom.xml`
+с этим пакетом в качестве единственной зависимости и сохранённый
+вывод Maven (`mvn_tree.txt`). Повторить сравнение можно командой
+`compare/run.sh` или `compare\run.bat` (нужны JDK и Maven в `PATH`).
+
+Вывод `mvn dependency:tree` (первая строка — служебный проект):
+
+```
+demo:demo-jackson:jar:1.0
+\- com.fasterxml.jackson.core:jackson-databind:jar:2.16.1:compile
+   +- com.fasterxml.jackson.core:jackson-annotations:jar:2.16.1:compile
+   \- com.fasterxml.jackson.core:jackson-core:jar:2.16.1:compile
+
+demo:demo-httpclient:jar:1.0
+\- org.apache.httpcomponents:httpclient:jar:4.5.14:compile
+   +- org.apache.httpcomponents:httpcore:jar:4.4.16:compile
+   +- commons-logging:commons-logging:jar:1.2:compile
+   \- commons-codec:commons-codec:jar:1.11:compile
+
+demo:demo-spring_web:jar:1.0
+\- org.springframework:spring-web:jar:6.1.3:compile
+   +- org.springframework:spring-beans:jar:6.1.3:compile
+   +- org.springframework:spring-core:jar:6.1.3:compile
+   |  \- org.springframework:spring-jcl:jar:6.1.3:compile
+   \- io.micrometer:micrometer-observation:jar:1.12.2:compile
+      \- io.micrometer:micrometer-commons:jar:1.12.2:compile
+```
+
+Во всех трёх случаях состав пакетов и версии совпадают с графом,
+который строит инструмент. Различия в представлении и поведении:
+
+1. **Где раскрывается общий пакет.** В подробном режиме
+   (`-Dverbose`, файл `compare/spring_web/mvn_tree_verbose.txt`)
+   Maven показывает, что `spring-core` встречается дважды: прямо у
+   `spring-web` и через `spring-beans`. Раскрывает он ближайшее к
+   корню вхождение, а второе помечает
+   `omitted for duplicate`:
+
+   ```
+   +- org.springframework:spring-beans:jar:6.1.3:compile
+   |  \- (org.springframework:spring-core:jar:6.1.3:compile - omitted for duplicate)
+   +- org.springframework:spring-core:jar:6.1.3:compile
+   |  \- org.springframework:spring-jcl:jar:6.1.3:compile
+   ```
+
+   Инструмент строит граф: `spring-core` — один узел с двумя
+   входящими рёбрами. В ASCII-дереве он раскрыт там, где его первым
+   встречает обход в глубину (под `spring-beans`), а прямое вхождение
+   помечено `(повтор)`. Состав дерева тот же, отличается только
+   место раскрытия.
+2. **Разрешение конфликтов версий.** Maven применяет правило
+   «ближайшая версия побеждает» и печатает `omitted for conflict`.
+   Инструмент версию не выбирает: разные версии одного артефакта
+   остаются разными узлами графа. В выбранных примерах конфликтов
+   нет, поэтому результаты совпадают.
+3. **Исключения.** `<exclusions>` в POM инструментом не учитываются,
+   Maven вырезает исключённые ветви. В примерах исключений нет.
+4. **Области видимости.** Для собственного проекта
+   `mvn dependency:tree` показывает и `test`/`provided`-зависимости.
+   Инструмент обходит только `compile` и `runtime` — те, что
+   переходят к потребителю пакета. Транзитивно Maven поступает так
+   же, поэтому у пакета-зависимости результаты совпадают. У
+   `commons-lang3` все зависимости тестовые, и инструмент показывает
+   пустой список.
+5. **Циклы.** В реальных репозиториях Maven циклов обычно нет. Они
+   показаны на тестовом репозитории, к которому Maven неприменим.
 
 ## Обработка ошибок
 
@@ -359,7 +530,8 @@ $ python src/main.py --config examples/bad_url.ini
 python -m pytest
 ```
 
-114 тестов покрывают разбор конфигурации и POM, свойства и наследование
-от родительских POM, фильтрацию областей видимости, тестовый
-репозиторий, обход графа, поиск циклов, обратные зависимости и
-сообщения об ошибках.
+117 тестов покрывают разбор конфигурации и POM, свойства и
+наследование от родительских POM, фильтрацию областей видимости,
+тестовый репозиторий, обход графа, поиск циклов, Mermaid,
+ASCII-дерево, запись PNG и сообщения об ошибках. Путь к пакету
+`src` задаёт `pytest.ini`.

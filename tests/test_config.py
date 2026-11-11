@@ -76,7 +76,6 @@ def test_items_cover_all_parameters(write_config):
         "repository.test_file",
         "output.image",
         "output.ascii_tree",
-        "output.reverse",
     ]
 
 
@@ -145,7 +144,6 @@ def test_missing_section_reports_error(write_config):
         ("image = graph.png", "image = graph.jpeg", "output.image"),
         ("image = graph.png", "image = no_dir/graph.png", "output.image"),
         ("ascii_tree = on", "ascii_tree = maybe", "output.ascii_tree"),
-        ("ascii_tree = on", "reverse = maybe", "output.reverse"),
         ("[package]", "[package]\nscope = compile", "package.scope"),
         ("[output]", "[extra]\nkey = 1\n\n[output]", "extra"),
     ],
@@ -233,15 +231,3 @@ def test_empty_boolean_means_default(write_config):
     text = VALID.replace("ascii_tree = on", "ascii_tree =")
 
     assert load_config(write_config(text)).ascii_tree is False
-
-
-def test_reverse_mode_is_off_by_default(write_config):
-    """Режим обратных зависимостей по умолчанию выключен."""
-    assert load_config(write_config(VALID)).reverse is False
-
-
-def test_reverse_mode_can_be_enabled(write_config):
-    """Режим обратных зависимостей включается параметром reverse."""
-    text = VALID + "reverse = on\n"
-
-    assert load_config(write_config(text)).reverse is True

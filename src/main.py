@@ -1,8 +1,8 @@
 """Точка входа инструмента визуализации графа зависимостей Maven.
 
-Этап 4: кроме графа зависимостей приложение умеет выводить обратные
-зависимости пакета — те пакеты, которые зависят от него. Обратные
-зависимости обходятся тем же алгоритмом, что и прямые.
+Этап 5: приложение строит граф зависимостей, формирует его описание
+на языке Mermaid, сохраняет изображение в файле PNG и, если задан
+соответствующий параметр, печатает зависимости в виде ASCII-дерева.
 
 При запуске ``python src/main.py`` каталог ``src`` автоматически
 попадает в путь поиска модулей, поэтому пакет ``depvis`` доступен.
@@ -13,14 +13,10 @@ from __future__ import annotations
 import argparse
 import sys
 
+from depvis import image, mermaid, tree
 from depvis.config import Config, load_config
 from depvis.errors import DepVisError
-from depvis.graph import (
-    Graph,
-    build_graph,
-    find_cycles,
-    reverse_view,
-)
+from depvis.graph import Graph, build_graph, find_cycles
 from depvis.maven import MavenRepository
 from depvis.package import Package
 from depvis.testrepo import TestRepository
@@ -103,46 +99,31 @@ def print_graph(graph: Graph) -> None:
             print(f"  {package}: {reason}")
 
 
-def reverse_graph(config: Config, repository) -> Graph:
-    """Граф обратных зависимостей пакета из конфигурации."""
-    if not config.test_mode:
-        raise DepVisError(
-            "обратные зависимости доступны только для тестового "
-            "репозитория: репозиторий Maven не позволяет узнать, кто "
-            "зависит от пакета, без полного индекса всех пакетов"
-        )
-    package = Package.parse(config.package_name)
-    view = reverse_view(repository, repository.packages())
-    if not view.has(package):
-        raise DepVisError(
-            f"пакет {package.name} не встречается в тестовом репозитории "
-            f"{config.test_file}"
-        )
-    return build_graph(view, package)
+def visualize(config: Config, graph: Graph) -> None:
+    """Построить описание Mermaid, изображение PNG и ASCII-дерево."""
+    description = mermaid.render(graph)
+    print("Представление графа на языке Mermaid:")
+    for line in description.splitlines():
+        print(f"  {line}")
 
+    mermaid_path = config.image_path.with_suffix(".mmd")
+    mermaid_path.write_text(description + "\n", encoding="utf-8")
+    image_path = image.render(graph, config.image_path)
+    print(f"Изображение графа: {image_path}")
+    print(f"Описание Mermaid: {mermaid_path}")
 
-def print_reverse(graph: Graph) -> None:
-    """Вывести обратные зависимости пакета."""
-    print(f"Обратные зависимости пакета {graph.root}")
-    print(f"  пакетов: {len(graph.nodes) - 1}")
-    for node in graph.nodes:
-        parents = ", ".join(str(item) for item in graph.children(node))
-        print(f"  {node} <- {parents or 'от него никто не зависит'}")
-
-    cycles = find_cycles(graph)
-    if cycles:
-        print("Циклические зависимости:")
-        for cycle in cycles:
-            print("  " + " <- ".join(str(item) for item in cycle))
+    if config.ascii_tree:
+        print("Дерево зависимостей:")
+        for line in tree.render(graph):
+            print(f"  {line}")
 
 
 def run(config: Config) -> None:
-    """Вывести граф или обратные зависимости пакета из конфигурации."""
+    """Построить граф зависимостей пакета и показать его."""
     repository = open_repository(config)
-    if config.reverse:
-        print_reverse(reverse_graph(config, repository))
-        return
-    print_graph(build_graph(repository, root_package(config, repository)))
+    graph = build_graph(repository, root_package(config, repository))
+    print_graph(graph)
+    visualize(config, graph)
 
 
 def main(argv: list[str] | None = None) -> int:

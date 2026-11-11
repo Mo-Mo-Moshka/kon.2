@@ -1,0 +1,5 @@
+demo:demo-httpclient:jar:1.0
+\- org.apache.httpcomponents:httpclient:jar:4.5.14:compile
+   +- org.apache.httpcomponents:httpcore:jar:4.4.16:compile
+   +- commons-logging:commons-logging:jar:1.2:compile
+   \- commons-codec:commons-codec:jar:1.11:compile

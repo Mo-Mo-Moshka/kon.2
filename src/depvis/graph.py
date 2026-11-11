@@ -106,46 +106,6 @@ def visit(
         graph.unresolved[package] = "версия зависимости не определена"
 
 
-class ReverseView:
-    """Источник данных, отдающий обратные зависимости пакета.
-
-    Подставляется в :func:`build_graph` вместо репозитория, поэтому
-    обратные зависимости строятся тем же обходом в ширину.
-    """
-
-    def __init__(self, parents: dict[Package, list[Package]]) -> None:
-        """Запомнить для каждого пакета список зависящих от него."""
-        self.parents = parents
-
-    def has(self, package: Package) -> bool:
-        """Известен ли пакет."""
-        return package in self.parents
-
-    def dependencies(self, package: Package) -> list[Package]:
-        """Пакеты, которые зависят от данного."""
-        return list(self.parents.get(package, []))
-
-
-def reverse_view(repository, packages: list[Package]) -> ReverseView:
-    """Построить обратные связи для перечисленных пакетов.
-
-    Пакеты, зависимости которых получить не удалось, пропускаются.
-    """
-    parents: dict[Package, list[Package]] = {
-        package: [] for package in packages
-    }
-    for package in packages:
-        try:
-            dependencies = repository.dependencies(package)
-        except DepVisError:
-            continue
-        for dependency in dependencies:
-            users = parents.setdefault(dependency, [])
-            if package not in users:
-                users.append(package)
-    return ReverseView(parents)
-
-
 def find_cycles(graph: Graph) -> list[list[Package]]:
     """Найти циклические зависимости обходом в глубину без рекурсии.
 
