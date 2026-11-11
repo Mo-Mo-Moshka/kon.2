@@ -12,7 +12,7 @@ from depvis.package import Package
 
 ROOT = Path(__file__).resolve().parents[1]
 
-CONFIG = """
+MAVEN_CONFIG = """
 [package]
 name = org.example:app
 version = 1.0
@@ -23,8 +23,23 @@ test_mode = off
 test_file =
 
 [output]
-image = graph.png
+image = {image}
 ascii_tree = on
+"""
+
+TEST_CONFIG = """
+[package]
+name = {name}
+version = 1.0
+
+[repository]
+url =
+test_mode = on
+test_file = {repo}
+
+[output]
+image = {image}
+ascii_tree = {tree}
 """
 
 EXAMPLE_ERRORS = [
@@ -52,10 +67,12 @@ class FakeRepository:
         self.url = url
 
     def dependencies(self, package: Package) -> list[Package]:
-        """Заданные в тесте зависимости или ошибка."""
+        """Зависимости корня или ошибка, заданная в тесте."""
         if self.error:
             raise RepositoryError(self.error)
-        return list(self.answer)
+        if package.artifact == "app":
+            return list(self.answer)
+        return []
 
 
 @pytest.fixture
@@ -65,32 +82,42 @@ def maven_config(tmp_path, monkeypatch):
     FakeRepository.answer = []
     FakeRepository.error = ""
     path = tmp_path / "config.ini"
-    path.write_text(CONFIG, encoding="utf-8")
+    image = (tmp_path / "graph.png").as_posix()
+    path.write_text(MAVEN_CONFIG.format(image=image), encoding="utf-8")
     return str(path)
 
 
-def test_direct_dependencies_are_printed(capsys, maven_config):
-    """Прямые зависимости пакета выводятся списком."""
-    FakeRepository.answer = [
-        Package("org.example", "core", "2.0"),
-        Package("org.example", "log", "1.5"),
-    ]
+@pytest.fixture
+def repo_config(tmp_path):
+    """Фабрика конфигураций тестового репозитория."""
+
+    def make(repo_text: str, name: str = "A", tree: str = "on") -> str:
+        """Записать репозиторий и конфигурацию, вернуть путь к ней."""
+        repo = tmp_path / "repo.txt"
+        repo.write_text(repo_text, encoding="utf-8")
+        path = tmp_path / "config.ini"
+        text = TEST_CONFIG.format(
+            name=name,
+            repo=repo.as_posix(),
+            image=(tmp_path / "graph.png").as_posix(),
+            tree=tree,
+        )
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    return make
+
+
+def test_maven_graph_is_printed(capsys, maven_config):
+    """Граф пакета Maven выводится вместе с зависимостями."""
+    FakeRepository.answer = [Package("org.example", "core", "2.0")]
 
     code = main.main(["--config", maven_config])
 
     out = capsys.readouterr().out
     assert code == 0
-    assert "Прямые зависимости пакета org.example:app:1.0:" in out
-    assert "  org.example:core:2.0" in out
-    assert "  org.example:log:1.5" in out
-
-
-def test_package_without_dependencies(capsys, maven_config):
-    """Пакет без зависимостей отмечается явно."""
-    code = main.main(["--config", maven_config])
-
-    assert code == 0
-    assert "зависимостей нет" in capsys.readouterr().out
+    assert "org.example:app:1.0 -> org.example:core:2.0" in out
+    assert "org.example:core:2.0 -> зависимостей нет" in out
 
 
 def test_repository_error_is_reported(capsys, maven_config):
@@ -103,12 +130,31 @@ def test_repository_error_is_reported(capsys, maven_config):
     assert "404" in capsys.readouterr().err
 
 
-def test_test_mode_is_not_supported_yet(capsys):
-    """Тестовый репозиторий на этом этапе ещё не поддерживается."""
-    code = main.main(["--config", str(ROOT / "examples" / "test_mode.ini")])
+def test_graph_of_test_repository_is_printed(capsys, repo_config):
+    """Граф тестового репозитория выводится вместе с циклами."""
+    code = main.main(["--config", repo_config("A: B C\nB: D\nC: D\nD: A\n")])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "пакетов: 4" in out
+    assert "A -> B, C" in out
+    assert "A -> B -> D -> A" in out
+
+
+def test_unresolved_package_is_listed(capsys, repo_config):
+    """Неописанный пакет перечисляется отдельно."""
+    code = main.main(["--config", repo_config("A: B\n")])
+
+    assert code == 0
+    assert "Не удалось получить зависимости:" in capsys.readouterr().out
+
+
+def test_unknown_root_in_test_repository_reports_error(capsys, repo_config):
+    """Корневого пакета нет в тестовом репозитории — ошибка."""
+    code = main.main(["--config", repo_config("A: B\nB:\n", name="Z")])
 
     assert code == 1
-    assert "следующем этапе" in capsys.readouterr().err
+    assert "не описан" in capsys.readouterr().err
 
 
 def test_invalid_config_reports_error_and_exit_code(capsys, tmp_path):

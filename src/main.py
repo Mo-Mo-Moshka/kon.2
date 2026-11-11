@@ -1,7 +1,8 @@
 """Точка входа инструмента визуализации графа зависимостей Maven.
 
-Этап 2: приложение читает конфигурацию, обращается к репозиторию
-Maven и выводит прямые зависимости заданного пакета.
+Этап 3: приложение строит граф зависимостей с учётом транзитивности
+обходом в ширину без рекурсии и выводит его на экран. Источником
+данных служит репозиторий Maven или файл тестового репозитория.
 
 При запуске ``python src/main.py`` каталог ``src`` автоматически
 попадает в путь поиска модулей, поэтому пакет ``depvis`` доступен.
@@ -14,8 +15,10 @@ import sys
 
 from depvis.config import Config, load_config
 from depvis.errors import DepVisError
+from depvis.graph import Graph, build_graph, find_cycles
 from depvis.maven import MavenRepository
 from depvis.package import Package
+from depvis.testrepo import TestRepository
 
 DEFAULT_CONFIG = "config.ini"
 
@@ -55,21 +58,50 @@ def use_utf8() -> None:
             continue
 
 
-def run(config: Config) -> None:
-    """Вывести прямые зависимости пакета, заданного в конфигурации."""
+def open_repository(config: Config):
+    """Открыть источник данных: тестовый репозиторий или Maven."""
     if config.test_mode:
-        raise DepVisError(
-            "работа с тестовым репозиторием появится на следующем этапе"
-        )
-    package = Package.parse(config.package_name, config.package_version)
-    repository = MavenRepository(config.repository_url)
-    dependencies = repository.dependencies(package)
+        return TestRepository.load(config.test_file)
+    return MavenRepository(config.repository_url)
 
-    print(f"Прямые зависимости пакета {package}:")
-    if not dependencies:
-        print("  зависимостей нет")
-    for dependency in dependencies:
-        print(f"  {dependency}")
+
+def root_package(config: Config, repository) -> Package:
+    """Пакет, с которого начинается обход."""
+    version = "" if config.test_mode else config.package_version
+    package = Package.parse(config.package_name, version)
+    if config.test_mode and not repository.has(package):
+        raise DepVisError(
+            f"пакет {package.name} не описан в тестовом репозитории "
+            f"{config.test_file}"
+        )
+    return package
+
+
+def print_graph(graph: Graph) -> None:
+    """Вывести граф зависимостей на экран."""
+    print(f"Граф зависимостей пакета {graph.root}")
+    print(f"  пакетов: {len(graph.nodes)}, зависимостей: {graph.edge_count}")
+    for node in graph.nodes:
+        children = graph.children(node)
+        targets = ", ".join(str(item) for item in children)
+        print(f"  {node} -> {targets or 'зависимостей нет'}")
+
+    cycles = find_cycles(graph)
+    if cycles:
+        print("Циклические зависимости:")
+        for cycle in cycles:
+            print("  " + " -> ".join(str(item) for item in cycle))
+
+    if graph.unresolved:
+        print("Не удалось получить зависимости:")
+        for package, reason in graph.unresolved.items():
+            print(f"  {package}: {reason}")
+
+
+def run(config: Config) -> None:
+    """Построить и вывести граф зависимостей пакета из конфигурации."""
+    repository = open_repository(config)
+    print_graph(build_graph(repository, root_package(config, repository)))
 
 
 def main(argv: list[str] | None = None) -> int:
