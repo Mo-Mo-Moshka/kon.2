@@ -25,6 +25,7 @@ test_file =
 [output]
 image = {image}
 ascii_tree = on
+reverse = {reverse}
 """
 
 TEST_CONFIG = """
@@ -40,6 +41,7 @@ test_file = {repo}
 [output]
 image = {image}
 ascii_tree = {tree}
+reverse = {reverse}
 """
 
 EXAMPLE_ERRORS = [
@@ -83,7 +85,8 @@ def maven_config(tmp_path, monkeypatch):
     FakeRepository.error = ""
     path = tmp_path / "config.ini"
     image = (tmp_path / "graph.png").as_posix()
-    path.write_text(MAVEN_CONFIG.format(image=image), encoding="utf-8")
+    text = MAVEN_CONFIG.format(image=image, reverse="off")
+    path.write_text(text, encoding="utf-8")
     return str(path)
 
 
@@ -91,7 +94,9 @@ def maven_config(tmp_path, monkeypatch):
 def repo_config(tmp_path):
     """Фабрика конфигураций тестового репозитория."""
 
-    def make(repo_text: str, name: str = "A", tree: str = "on") -> str:
+    def make(
+        repo_text: str, name: str = "A", tree: str = "on", reverse="off"
+    ) -> str:
         """Записать репозиторий и конфигурацию, вернуть путь к ней."""
         repo = tmp_path / "repo.txt"
         repo.write_text(repo_text, encoding="utf-8")
@@ -101,6 +106,7 @@ def repo_config(tmp_path):
             repo=repo.as_posix(),
             image=(tmp_path / "graph.png").as_posix(),
             tree=tree,
+            reverse=reverse,
         )
         path.write_text(text, encoding="utf-8")
         return str(path)
@@ -155,6 +161,51 @@ def test_unknown_root_in_test_repository_reports_error(capsys, repo_config):
 
     assert code == 1
     assert "не описан" in capsys.readouterr().err
+
+
+def test_reverse_dependencies_are_printed(capsys, repo_config):
+    """Обратные зависимости выводятся вместе с цепочкой наверх."""
+    config = repo_config("A: B C\nB: D\nC: D\nD:\n", "D", reverse="on")
+
+    code = main.main(["--config", config])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Обратные зависимости пакета D" in out
+    assert "D <- B, C" in out
+    assert "A <- от него никто не зависит" in out
+
+
+def test_reverse_dependencies_with_cycle(capsys, repo_config):
+    """Цикл среди обратных зависимостей выводится отдельно."""
+    config = repo_config("A: B\nB: C\nC: A\n", reverse="on")
+
+    code = main.main(["--config", config])
+
+    assert code == 0
+    assert "A <- C <- B <- A" in capsys.readouterr().out
+
+
+def test_reverse_of_unknown_package_reports_error(capsys, repo_config):
+    """Пакета нет в тестовом репозитории — ошибка."""
+    config = repo_config("A: B\nB:\n", "Z", reverse="on")
+
+    code = main.main(["--config", config])
+
+    assert code == 1
+    assert "не встречается" in capsys.readouterr().err
+
+
+def test_reverse_mode_is_rejected_for_maven(capsys, tmp_path):
+    """Для репозитория Maven режим обратных зависимостей недоступен."""
+    path = tmp_path / "config.ini"
+    text = MAVEN_CONFIG.format(image="graph.png", reverse="on")
+    path.write_text(text, encoding="utf-8")
+
+    code = main.main(["--config", str(path)])
+
+    assert code == 1
+    assert "только для тестового репозитория" in capsys.readouterr().err
 
 
 def test_invalid_config_reports_error_and_exit_code(capsys, tmp_path):

@@ -24,7 +24,7 @@ from .errors import ConfigError
 SCHEMA: dict[str, tuple[str, ...]] = {
     "package": ("name", "version"),
     "repository": ("url", "test_mode", "test_file"),
-    "output": ("image", "ascii_tree"),
+    "output": ("image", "ascii_tree", "reverse"),
 }
 
 TRUE_VALUES = frozenset({"1", "true", "yes", "on", "да"})
@@ -49,6 +49,7 @@ class Config:
     test_file: Path | None
     image_path: Path
     ascii_tree: bool
+    reverse: bool
 
     def as_items(self) -> list[tuple[str, str]]:
         """Параметры в виде пар ключ-значение для вывода на экран."""
@@ -61,6 +62,7 @@ class Config:
             ("repository.test_file", test_file),
             ("output.image", str(self.image_path)),
             ("output.ascii_tree", format_bool(self.ascii_tree)),
+            ("output.reverse", format_bool(self.reverse)),
         ]
 
 
@@ -98,6 +100,7 @@ def load_config(path: str | Path) -> Config:
         test_file=test_path,
         image_path=check_image(get_required(parser, "output", "image")),
         ascii_tree=get_bool(parser, "output", "ascii_tree", default=False),
+        reverse=get_bool(parser, "output", "reverse", default=False),
     )
 
 

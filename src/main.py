@@ -1,8 +1,8 @@
 """Точка входа инструмента визуализации графа зависимостей Maven.
 
-Этап 3: приложение строит граф зависимостей с учётом транзитивности
-обходом в ширину без рекурсии и выводит его на экран. Источником
-данных служит репозиторий Maven или файл тестового репозитория.
+Этап 4: кроме графа зависимостей приложение умеет выводить обратные
+зависимости пакета — те пакеты, которые зависят от него. Обратные
+зависимости обходятся тем же алгоритмом, что и прямые.
 
 При запуске ``python src/main.py`` каталог ``src`` автоматически
 попадает в путь поиска модулей, поэтому пакет ``depvis`` доступен.
@@ -15,7 +15,12 @@ import sys
 
 from depvis.config import Config, load_config
 from depvis.errors import DepVisError
-from depvis.graph import Graph, build_graph, find_cycles
+from depvis.graph import (
+    Graph,
+    build_graph,
+    find_cycles,
+    reverse_view,
+)
 from depvis.maven import MavenRepository
 from depvis.package import Package
 from depvis.testrepo import TestRepository
@@ -98,9 +103,45 @@ def print_graph(graph: Graph) -> None:
             print(f"  {package}: {reason}")
 
 
+def reverse_graph(config: Config, repository) -> Graph:
+    """Граф обратных зависимостей пакета из конфигурации."""
+    if not config.test_mode:
+        raise DepVisError(
+            "обратные зависимости доступны только для тестового "
+            "репозитория: репозиторий Maven не позволяет узнать, кто "
+            "зависит от пакета, без полного индекса всех пакетов"
+        )
+    package = Package.parse(config.package_name)
+    view = reverse_view(repository, repository.packages())
+    if not view.has(package):
+        raise DepVisError(
+            f"пакет {package.name} не встречается в тестовом репозитории "
+            f"{config.test_file}"
+        )
+    return build_graph(view, package)
+
+
+def print_reverse(graph: Graph) -> None:
+    """Вывести обратные зависимости пакета."""
+    print(f"Обратные зависимости пакета {graph.root}")
+    print(f"  пакетов: {len(graph.nodes) - 1}")
+    for node in graph.nodes:
+        parents = ", ".join(str(item) for item in graph.children(node))
+        print(f"  {node} <- {parents or 'от него никто не зависит'}")
+
+    cycles = find_cycles(graph)
+    if cycles:
+        print("Циклические зависимости:")
+        for cycle in cycles:
+            print("  " + " <- ".join(str(item) for item in cycle))
+
+
 def run(config: Config) -> None:
-    """Построить и вывести граф зависимостей пакета из конфигурации."""
+    """Вывести граф или обратные зависимости пакета из конфигурации."""
     repository = open_repository(config)
+    if config.reverse:
+        print_reverse(reverse_graph(config, repository))
+        return
     print_graph(build_graph(repository, root_package(config, repository)))
 
 

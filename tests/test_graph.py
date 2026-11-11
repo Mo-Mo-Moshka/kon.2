@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from depvis.graph import GraphError, build_graph, find_cycles
+from depvis.graph import (
+    GraphError,
+    build_graph,
+    find_cycles,
+    reverse_view,
+)
 from depvis.package import Package
 from depvis.testrepo import TestRepository, TestRepositoryError
 
@@ -116,3 +121,48 @@ def test_dependency_without_version_is_not_requested():
     graph = build_graph(VersionlessRepository(), root)
 
     assert names(graph.unresolved) == ["org.example:core"]
+
+
+def reverse_of(text: str, name: str):
+    """Граф обратных зависимостей пакета ``name``."""
+    repository = TestRepository.parse(text, "repo.txt")
+    view = reverse_view(repository, repository.packages())
+    return build_graph(view, pkg(name))
+
+
+def test_reverse_view_lists_dependents():
+    """Обратные связи перечисляют зависящие пакеты."""
+    repository = TestRepository.parse("A: B C\nB: D\nC: D\nD:\n", "r")
+
+    view = reverse_view(repository, repository.packages())
+
+    assert names(view.dependencies(pkg("D"))) == ["B", "C"]
+    assert view.dependencies(pkg("A")) == []
+    assert view.has(pkg("D")) is True
+    assert view.has(pkg("Z")) is False
+
+
+def test_reverse_graph_uses_the_same_traversal():
+    """Обратные зависимости обходятся тем же BFS."""
+    graph = reverse_of("A: B\nB: C\nC:\nD: C\n", "C")
+
+    assert names(graph.nodes) == ["C", "B", "D", "A"]
+    assert names(graph.children(pkg("C"))) == ["B", "D"]
+    assert names(graph.children(pkg("B"))) == ["A"]
+
+
+def test_reverse_graph_handles_cycles():
+    """Цикл среди обратных зависимостей не зацикливает обход."""
+    graph = reverse_of("A: B\nB: C\nC: A\n", "A")
+
+    assert names(graph.nodes) == ["A", "C", "B"]
+    assert [names(cycle) for cycle in find_cycles(graph)] == [
+        ["A", "C", "B", "A"]
+    ]
+
+
+def test_undeclared_package_is_skipped_in_reverse_view():
+    """Неописанный пакет не мешает построить обратные связи."""
+    graph = reverse_of("A: B\n", "B")
+
+    assert names(graph.nodes) == ["B", "A"]
