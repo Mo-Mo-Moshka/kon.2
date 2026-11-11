@@ -1,7 +1,7 @@
 """Точка входа инструмента визуализации графа зависимостей Maven.
 
-Этап 1: приложение читает конфигурационный файл формата INI и выводит
-все настраиваемые пользователем параметры в формате ключ-значение.
+Этап 2: приложение читает конфигурацию, обращается к репозиторию
+Maven и выводит прямые зависимости заданного пакета.
 
 При запуске ``python src/main.py`` каталог ``src`` автоматически
 попадает в путь поиска модулей, поэтому пакет ``depvis`` доступен.
@@ -14,6 +14,8 @@ import sys
 
 from depvis.config import Config, load_config
 from depvis.errors import DepVisError
+from depvis.maven import MavenRepository
+from depvis.package import Package
 
 DEFAULT_CONFIG = "config.ini"
 
@@ -53,12 +55,21 @@ def use_utf8() -> None:
             continue
 
 
-def print_config(config: Config) -> None:
-    """Вывести параметры в формате ключ-значение."""
-    width = max(len(key) for key, _ in config.as_items())
-    print("Параметры конфигурации:")
-    for key, value in config.as_items():
-        print(f"  {key.ljust(width)} = {value}")
+def run(config: Config) -> None:
+    """Вывести прямые зависимости пакета, заданного в конфигурации."""
+    if config.test_mode:
+        raise DepVisError(
+            "работа с тестовым репозиторием появится на следующем этапе"
+        )
+    package = Package.parse(config.package_name, config.package_version)
+    repository = MavenRepository(config.repository_url)
+    dependencies = repository.dependencies(package)
+
+    print(f"Прямые зависимости пакета {package}:")
+    if not dependencies:
+        print("  зависимостей нет")
+    for dependency in dependencies:
+        print(f"  {dependency}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -70,7 +81,11 @@ def main(argv: list[str] | None = None) -> int:
     except DepVisError as error:
         print(f"Ошибка конфигурации: {error}", file=sys.stderr)
         return 1
-    print_config(config)
+    try:
+        run(config)
+    except DepVisError as error:
+        print(f"Ошибка: {error}", file=sys.stderr)
+        return 1
     return 0
 
 

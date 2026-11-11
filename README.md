@@ -12,8 +12,8 @@
 Этапы работы:
 
 1. **Минимальный прототип с конфигурацией** — CLI-приложение,
-   настраиваемое через файл формата INI (текущий этап).
-2. Сбор данных о прямых зависимостях пакета Maven.
+   настраиваемое через файл формата INI.
+2. **Сбор данных** — прямые зависимости пакета Maven (текущий этап).
 3. Построение графа с учётом транзитивности (BFS без рекурсии).
 4. Обратные зависимости.
 5. Визуализация: Mermaid, PNG, ASCII-дерево.
@@ -22,9 +22,11 @@
 
 ```
 src/
-  main.py               точка входа, вывод параметров
+  main.py               точка входа
   depvis/
     config.py           чтение и проверка INI-конфигурации
+    package.py          координаты пакета Maven
+    maven.py            загрузка и разбор POM, прямые зависимости
     errors.py           ошибки приложения
 config.ini              конфигурация по умолчанию
 examples/
@@ -33,6 +35,8 @@ examples/
   bad_*.ini             примеры ошибок в параметрах
 tests/
   test_config.py        тесты конфигурации
+  test_package.py       тесты координат пакета
+  test_maven.py         тесты разбора POM и прямых зависимостей
   test_main.py          тесты точки входа
 run.sh / run.bat        запуск приложения
 pytest.ini              настройки pytest (путь к пакету src)
@@ -99,7 +103,8 @@ E: A
 
 ## Этап 1. Вывод параметров
 
-При запуске приложение выводит все настраиваемые пользователем
+Требование вывода параметров относилось только к первому этапу:
+при запуске приложение печатало все настраиваемые пользователем
 параметры в формате «ключ = значение».
 
 ```
@@ -125,6 +130,52 @@ $ python src/main.py --config examples/test_mode.ini
   output.image         = A.png
   output.ascii_tree    = on
 ```
+
+## Этап 2. Сбор данных
+
+Приложение само скачивает файл POM пакета по адресу
+`{url}/{groupId через /}/{artifactId}/{version}/{artifactId}-{version}.pom`
+и разбирает его средствами стандартной библиотеки
+(`urllib` и `xml.etree.ElementTree`). Менеджеры пакетов и сторонние
+библиотеки не используются.
+
+При определении прямых зависимостей учитываются:
+
+- цепочка родительских POM (`<parent>`) — свойства, унаследованные
+  зависимости и `dependencyManagement`;
+- подстановка свойств `${...}`, включая `${project.version}`;
+- версии из `dependencyManagement`, в том числе импортированные
+  из BOM (`<type>pom</type><scope>import</scope>`);
+- отбрасываются зависимости областей `test`, `provided`, `system`
+  и помеченные `<optional>true</optional>`.
+
+Скачанные POM кэшируются в памяти, повторные обращения к одному
+пакету не создают новых запросов.
+
+```
+$ python src/main.py
+Прямые зависимости пакета org.apache.commons:commons-lang3:3.14.0:
+  зависимостей нет
+```
+
+```
+$ python src/main.py --config examples/jackson.ini
+Прямые зависимости пакета com.fasterxml.jackson.core:jackson-databind:2.16.1:
+  com.fasterxml.jackson.core:jackson-annotations:2.16.1
+  com.fasterxml.jackson.core:jackson-core:2.16.1
+```
+
+```
+$ python src/main.py --config examples/httpclient.ini
+Прямые зависимости пакета org.apache.httpcomponents:httpclient:4.5.14:
+  org.apache.httpcomponents:httpcore:4.4.16
+  commons-logging:commons-logging:1.2
+  commons-codec:commons-codec:1.11
+```
+
+У `commons-lang3` все объявленные зависимости имеют область `test`,
+поэтому список прямых зависимостей пуст — так же их показывает и
+`mvn dependency:tree`.
 
 ## Обработка ошибок
 
@@ -160,5 +211,6 @@ $ python src/main.py --config examples/bad_url.ini
 python -m pytest
 ```
 
-49 тестов покрывают разбор корректной конфигурации, синонимы логических
-значений, тестовый режим и сообщения об ошибках для каждого параметра.
+76 тестов покрывают разбор конфигурации и POM, свойства, наследование
+от родительских POM, фильтрацию областей видимости и сообщения об
+ошибках.
